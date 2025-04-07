@@ -1,111 +1,113 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity >=0.8.2 <0.9.0;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
-import "@openzeppelin/contracts/finance/PaymentSplitter.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Royalty.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 
-contract MartianFroggies is ERC721, ERC721Enumerable, ReentrancyGuard, PaymentSplitter, Ownable {
-    uint256 public constant MAX_FROGGIES = 7777;
-    uint256 public mintPrice = 0.08 ether;
-    uint public whitelistmintPrice = 0.04 ether; // Whitelist mint price
-    uint256 public constant royaltyFee = 200; // 2% royalty
+contract MF7K is ERC721Enumerable, ERC721Royalty, Ownable {
+    using Strings for uint256;
 
+    uint256 public constant MAX_SUPPLY = 6000;
+    uint256 public constant MAX_PER_WALLET = 100;
+    uint256 public constant PRICE = 0.1 ether;
+    string public baseTokenURI;
+    bool public paused = false;
 
-    address public constant rvltWallet = 0x292877C901A129c4330aA845ebC5E4954126d543; // Replace with actual $RVLT wallet address
-    address public constant cultWallet = 0x456; // Replace with actual $CULT wallet address
-    address public constant shibWallet = 0x789; // Replace with actual $SHIB wallet address
-    address public constant wFUNDWallet = 0xABC; // Replace with actual $wFUND wallet address
-    address public artistWallet;
-    address public stakingPool;
+    address public nftHoldersWallet = 0xae23fDA3A9051784992eb82d2A826D425da2c655; // Wallet to be used to hold the ETH for NFT holdets and later on stake ETH
+    address public ownerWallet = 0x95e5A9B2d6F131B82D2bD25b74913053A34E81D5; 
+    address public philanthropicWallet = 0x5E116A5AF6A3cAb148bc249B682fEEb857563e12; // The RVLT wallet in which teh people talkaboutcult
+    address public shibaInuWallet = 0x9bf31F6A06c16872e8A02d768C6cAf35EC7d5088; // The wallet to swap ETH to SHIB and burn that SHIB
 
-    bool public whitelistMintOpen = false;
-    bool public publicMintOpen = false;
-    mapping(address => bool) public whitelist;
+    uint96 public constant ROYALTY_FEE = 200;
 
-    uint256 public whitelistMintStartTime;
-    uint256 public publicMintStartTime;
-
-    uint256[] private _shares = [45, 5, 5, 5, 25, 5]; // Updated shares: Artist, RVLT, CULT, SHIB, Staking, wFUND
-    address[] private _shareholders = [artistWallet, rvltWallet, cultWallet, shibWallet, stakingPool, wFUNDWallet];
-
-    constructor(string memory baseURI, address _artistWallet, address _stakingPool)
-        ERC721("The Martian Froggies", "TMF")
-        PaymentSplitter(_shareholders, _shares) {
-        artistWallet = _artistWallet;
-        stakingPool = _stakingPool;
-        _setBaseURI(baseURI);
-        transferOwnership(_artistWallet); // Set the artist as the owner
+    constructor(string memory baseURI) ERC721("MartianFroggiesArt", "MFGA") Ownable(msg.sender) {
+        setBaseURI(baseURI);
+        _setDefaultRoyalty(address(this), ROYALTY_FEE);
     }
 
-    function whitelistMint(uint256 numberOfTokens) public payable nonReentrant {
-        require(whitelistMintOpen && block.timestamp >= whitelistMintStartTime, "Whitelist mint is not open");
-        require(whitelist[msg.sender], "Not on the whitelist");
-        require(totalSupply() + numberOfTokens <= MAX_FROGGIES, "Sale would exceed max supply");
-        require(whitelistmintPrice * numberOfTokens <= msg.value, "Ether value sent is not correct");
+    function _baseURI() internal view virtual override returns (string memory) {
+        return baseTokenURI;
+    }
 
-        for (uint256 i = 0; i < numberOfTokens; i++) {
-            if (totalSupply() < MAX_FROGGIES) {
-                _safeMint(msg.sender, totalSupply());
-            }
+    function setBaseURI(string memory baseURI) public onlyOwner {
+        baseTokenURI = baseURI;
+    }
+
+    function mint(uint256 _amount) public payable {
+        uint256 totalMinted = totalSupply();
+        require(!paused, "Minting is paused");
+        require(_amount > 0 && _amount <= MAX_PER_WALLET, "Cannot mint specified number of NFTs");
+        require(totalMinted + _amount <= MAX_SUPPLY, "Minting would exceed max supply");
+        require(balanceOf(msg.sender) + _amount <= MAX_PER_WALLET, "Exceeds maximum NFTs per wallet");
+        require(msg.value >= PRICE * _amount, "Ether sent is not correct");
+        
+        for (uint256 i = 0; i < _amount; i++) {
+            _safeMint(msg.sender, totalSupply() + 1);
+        }
+        distributeFunds(msg.value);
+    }
+
+    function distributeFunds(uint256 amount) internal {
+        uint256 nftHoldersShare = (amount * 20) / 100;
+        uint256 ownerShare = (amount * 60) / 100;
+        uint256 philanthropicShare = (amount * 10) / 100;
+        uint256 shibaInuShare = (amount * 10) / 100;
+        
+        sendFunds(nftHoldersWallet, nftHoldersShare);
+        sendFunds(ownerWallet, ownerShare);
+        sendFunds(philanthropicWallet, philanthropicShare);
+        sendFunds(shibaInuWallet, shibaInuShare);
+    }
+
+    function sendFunds(address recipient, uint256 amount) internal {
+        (bool success, ) = recipient.call{value: amount}("");
+        require(success, "Transfer failed");
+    }
+
+    function _distributeRoyalties(uint256 value) internal {
+        uint256 halfFee = value / 2;
+        if (ownerWallet != address(0)) {
+            (bool success, ) = ownerWallet.call{value: halfFee}("");
+            // No require, so failure doesn’t block the next transfer
+        }
+        if (nftHoldersWallet != address(0)) {
+            (bool success, ) = nftHoldersWallet.call{value: halfFee}("");
+            // No require, so failure doesn’t block
         }
     }
 
-    function publicMint(uint256 numberOfTokens) public payable nonReentrant {
-        require(publicMintOpen && block.timestamp >= publicMintStartTime, "Public mint is not open");
-        require(totalSupply() + numberOfTokens <= MAX_FROGGIES, "Sale would exceed max supply");
-        require(mintPrice * numberOfTokens <= msg.value, "Ether value sent is not correct");
-
-        for (uint256 i = 0; i < numberOfTokens; i++) {
-            if (totalSupply() < MAX_FROGGIES) {
-                _safeMint(msg.sender, totalSupply());
-            }
+    receive() external payable {
+        if (msg.value > 0) {
+            _distributeRoyalties(msg.value);
         }
     }
 
-    function setMintDates(uint256 _whitelistMintStartTime, uint256 _publicMintStartTime) public onlyOwner {
-        whitelistMintStartTime = _whitelistMintStartTime;
-        publicMintStartTime = _publicMintStartTime;
+    fallback() external payable {
+        if (msg.value > 0) {
+            _distributeRoyalties(msg.value);
+        }
     }
 
-    function toggleWhitelistMint(bool _state) public onlyOwner {
-        whitelistMintOpen = _state;
+    function pause(bool _state) public onlyOwner { 
+        paused = _state;
     }
 
-    function togglePublicMint(bool _state) public onlyOwner {
-        publicMintOpen = _state;
+    function withdraw() public onlyOwner {
+        sendFunds(owner(), address(this).balance);
+        pause(true);
     }
 
-    function withdraw() public {
-        require(msg.sender == artistWallet, "Only artist can withdraw");
-        payable(artistWallet).transfer(address(this).balance);
-    }
-
-    // Royalty info for marketplaces
-    function royaltyInfo(uint256 _tokenId, uint256 _salePrice) external view returns (address, uint256) {
-        uint256 royaltyAmount = (_salePrice * royaltyFee) / 10000;
-        return (artistWallet, royaltyAmount);
-    }
-
-    function _beforeTokenTransfer(address from, address to, uint256 tokenId)
-        internal
-        override(ERC721, ERC721Enumerable)
-    {
-        super._beforeTokenTransfer(from, to, tokenId);
-    }
-
-    function _burn(uint256 tokenId) internal override(ERC721) {
-        super._burn(tokenId);
-    }
-
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(ERC721, ERC721Enumerable)
-        returns (bool)
-    {
+    function supportsInterface(bytes4 interfaceId) public view virtual override(ERC721Enumerable, ERC721Royalty) returns (bool) {
         return super.supportsInterface(interfaceId);
+    }
+
+    function _update(address to, uint256 tokenId, address auth) internal virtual override(ERC721, ERC721Enumerable) returns (address) {
+        return super._update(to, tokenId, auth);
+    }
+
+    function _increaseBalance(address account, uint128 amount) internal virtual override(ERC721, ERC721Enumerable) {
+        super._increaseBalance(account, amount);
     }
 }
