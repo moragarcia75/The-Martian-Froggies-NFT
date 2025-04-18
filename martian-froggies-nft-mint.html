@@ -1,0 +1,130 @@
+<!-- Replace the "Advanced > HTML" block in Site Builder -->
+<div id="mint-nft-root" style="min-height: 200px;"></div>
+
+<!-- Load Dependencies -->
+<script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.23.10/babel.min.js"></script>
+<script src="https://unpkg.com/@walletconnect/ethereum-provider@2.11.0/dist/umd/index.min.js"></script>
+
+<!-- React Component -->
+<script type="text/babel" data-presets="env,react">
+  function waitForEthers(callback, retries = 10, delay = 500) {
+    if (window.ethers) callback();
+    else if (retries > 0) {
+      console.log("Waiting for ethers.js, retries left:", retries);
+      setTimeout(() => waitForEthers(callback, retries - 1, delay), delay);
+    } else {
+      console.error("ethers.js failed to load!");
+      document.getElementById("mint-nft-root").innerHTML = "<p>Error: ethers.js failed to load.</p>";
+    }
+  }
+
+  window.addEventListener('load', function() {
+    waitForEthers(function() {
+      console.log("ethers.js loaded, version:", ethers.version);
+
+      const CONTRACT_ADDRESS = "0xb35bade0dfe2c7d9b81a5d473a1c84727b59ac98"; // Mainnet address
+      const PRICE_PER_NFT = "0.05"; // Matches 0.05 ETH
+      const MAINNET_RPC_URL = "https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161"; // Public Infura endpoint
+      const contractABI = [{"inputs":[{"internalType":"uint256","name":"_amount","type":"uint256"}],"name":"mint","outputs":[],"stateMutability":"payable","type":"function"}];
+
+      function MintNFT() {
+        const [amount, setAmount] = React.useState(1);
+        const [status, setStatus] = React.useState("Select a wallet to connect");
+        const [walletConnected, setWalletConnected] = React.useState(false);
+        const [walletBalance, setWalletBalance] = React.useState("0");
+        const [selectedWallet, setSelectedWallet] = React.useState(null);
+
+        const connectWallet = async (walletType) => {
+          let provider;
+          try {
+            if (walletType === "metamask" && window.ethereum) {
+              await window.ethereum.request({ method: "eth_requestAccounts" });
+              provider = new ethers.providers.Web3Provider(window.ethereum);
+            } else if (walletType === "phantom" && window.phantom?.ethereum) {
+              await window.phantom.ethereum.request({ method: "eth_requestAccounts" });
+              provider = new ethers.providers.Web3Provider(window.phantom.ethereum);
+            } else if (walletType === "walletconnect") {
+              const wcProvider = new EthereumProvider({chainId: 1, rpc: { 1: MAINNET_RPC_URL }});
+              await wcProvider.enable();
+              provider = new ethers.providers.Web3Provider(wcProvider);
+            } else {
+              setStatus("Selected wallet not detected!");
+              return;
+            }
+            const network = await provider.getNetwork();
+            if (network.chainId !== 1) {
+              try { await provider.send("wallet_switchEthereumChain", [{ chainId: "0x1" }]); }
+              catch (e) { setStatus("Please switch to Mainnet."); return; }
+            }
+            const balance = await provider.getBalance(await provider.getSigner().getAddress());
+            setWalletBalance(ethers.utils.formatEther(balance));
+            setWalletConnected(true);
+            setSelectedWallet(walletType);
+            setStatus(`Connected with ${walletType}! Balance: ${ethers.utils.formatEther(balance)} ETH`);
+          } catch (error) {
+            setStatus(`Connection failed: ${error.message}`);
+            console.error("Connect error:", error);
+          }
+        };
+
+        const mintNFTs = async () => {
+          if (!walletConnected) { setStatus("Please connect a wallet first!"); return; }
+          if (amount < 1 || amount > 50) { setStatus("Please select between 1 and 50 NFTs!"); return; }
+          try {
+            setStatus("Preparing transaction...");
+            let provider = selectedWallet === "metamask" ? new ethers.providers.Web3Provider(window.ethereum) :
+                          selectedWallet === "phantom" ? new ethers.providers.Web3Provider(window.phantom.ethereum) :
+                          selectedWallet === "walletconnect" ? new ethers.providers.Web3Provider(EthereumProvider.init({chainId: 1, rpc: { 1: MAINNET_RPC_URL }})) :
+                          null;
+            if (!provider) { setStatus("No wallet selected!"); return; }
+            const signer = provider.getSigner();
+            const contract = new ethers.Contract(CONTRACT_ADDRESS, contractABI, signer);
+            const totalCost = ethers.utils.parseEther(PRICE_PER_NFT).mul(amount);
+            const gasEstimate = await contract.estimateGas.mint(amount, { value: totalCost });
+            const tx = await contract.mint(amount, { value: totalCost, gasLimit: gasEstimate.mul(15).div(10) });
+            setStatus(`Transaction sent: ${tx.hash}`);
+            console.log("Tx sent:", tx.hash);
+            const receipt = await tx.wait();
+            setStatus(`Minted ${amount} Froggie${amount > 1 ? 's' : ''}! Tx: ${receipt.transactionHash}`);
+          } catch (error) {
+            const reason = error.reason || error.message || "Unknown error";
+            const txHash = error.transactionHash || "N/A";
+            setStatus(`Minting failed: ${reason} (Tx: ${txHash})`);
+            console.error("Mint error:", error);
+          }
+        };
+
+        return React.createElement("div", { style: { textAlign: "center", padding: "20px", fontFamily: "Arial", minHeight: "200px" } },
+          React.createElement("h2", { style: { marginBottom: "20px" } }, "Mint TheMartianFroggiesArt NFTs"),
+          React.createElement("p", { style: { marginBottom: "15px" } }, status),
+          !walletConnected && React.createElement("div", { style: { display: "flex", justifyContent: "center", gap: "10px", marginBottom: "15px" } },
+            React.createElement("button", { onClick: () => connectWallet("metamask"), style: { padding: "10px 20px", fontSize: "16px", backgroundColor: "#4CAF50", color: "white", border: "none", cursor: "pointer", borderRadius: "5px" } }, "MetaMask"),
+            React.createElement("button", { onClick: () => connectWallet("phantom"), style: { padding: "10px 20px", fontSize: "16px", backgroundColor: "#AB47BC", color: "white", border: "none", cursor: "pointer", borderRadius: "5px" } }, "Phantom"),
+            React.createElement("button", { onClick: () => connectWallet("walletconnect"), style: { padding: "10px 20px", fontSize: "16px", backgroundColor: "#2196F3", color: "white", border: "none", cursor: "pointer", borderRadius: "5px" } }, "WalletConnect")
+          ),
+          walletConnected && React.createElement("div", null,
+            React.createElement("label", { style: { marginRight: "10px", fontSize: "16px" } }, "Number of NFTs (1-50):"),
+            React.createElement("input", {
+              type: "number", min: "1", max: "50", value: amount,
+              onChange: (e) => { const val = parseInt(e.target.value) || 1; setAmount(Math.min(Math.max(val, 1), 50)); },
+              style: { padding: "5px", width: "60px", marginBottom: "15px", fontSize: "16px" }
+            }),
+            React.createElement("br"),
+            React.createElement("p", { style: { marginBottom: "15px" } }, `Minting ${amount} NFT${amount > 1 ? 's' : ''} for ${(amount * parseFloat(PRICE_PER_NFT)).toFixed(2)} ETH (Balance: ${parseFloat(walletBalance).toFixed(4)} ETH)`),
+            React.createElement("button", { onClick: mintNFTs, style: { padding: "10px 20px", fontSize: "16px", backgroundColor: "#2196F3", color: "white", border: "none", cursor: "pointer", borderRadius: "5px" } }, `Mint ${amount} Froggie${amount > 1 ? 's' : ''} (${(amount * parseFloat(PRICE_PER_NFT)).toFixed(2)} ETH)`)
+          )
+        );
+      }
+
+      try {
+        ReactDOM.render(React.createElement(MintNFT), document.getElementById("mint-nft-root"));
+        console.log("Component rendered successfully");
+      } catch (e) {
+        console.error("Render error:", e);
+      }
+    });
+  });
+</script>
