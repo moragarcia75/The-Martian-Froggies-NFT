@@ -15,10 +15,10 @@ contract MF7K is ERC721Enumerable, ERC721Royalty, Ownable {
     string public baseTokenURI;
     bool public paused = false;
 
-    address public nftHoldersWallet = 0x788aCe2bd889F879dE9D471Bf96b9C13Bb87Ba4c; // Wallet to be used to hold the ETH for NFT holders and later on stake ETH
-    address public ownerWallet = 0x95e5A9B2d6F131B82D2bD25b74913053A34E81D5; 
-    address public philanthropicWallet = 0xaC3c5a7FBA884BfE3660b2b0EE1e19f1dceb9E0E; // The RVLT wallet in which teh people talkaboutcult
-    address public shibaInuWallet = 0x9bf31F6A06c16872e8A02d768C6cAf35EC7d5088; // The wallet to swap ETH to SHIB and burn that SHIB
+    address public nftHoldersWallet = ADDRESS_HERE; // Wallet to be used to hold the ETH for NFT holders and later on stake ETH
+    address public ownerWallet = ADDRESS_HERE; 
+    address public philanthropicWallet = ADDRESS_HERE; // The RVLT wallet in which teh people talkaboutcult
+    address public shibaInuWallet = ADDRESS_HERE; // The wallet to swap ETH to SHIB and burn that SHIB
 
     uint96 public constant ROYALTY_FEE = 200;
 
